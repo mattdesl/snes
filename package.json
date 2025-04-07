@@ -1,0 +1,42 @@
+{
+  "name": "snes",
+  "version": "1.0.0",
+  "description": "separable Natural Evolutionary Strategy",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "author": {
+    "name": "Matt DesLauriers",
+    "url": "https://github.com/mattdesl"
+  },
+  "devDependencies": {
+    "@texel/color": "^1.1.10",
+    "canvas-sketch": "^0.7.7",
+    "vite": "^6.2.5"
+  },
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "nes",
+    "xnes",
+    "snes",
+    "natural",
+    "es",
+    "evolutionary",
+    "evolution",
+    "strategies",
+    "strategy",
+    "search",
+    "genetic",
+    "algorithm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/mattdesl/snes.git"
+  },
+  "homepage": "https://github.com/mattdesl/snes",
+  "bugs": {
+    "url": "https://github.com/mattdesl/snes/issues"
+  }
+}
