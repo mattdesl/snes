@@ -1,8 +1,10 @@
 # snes
 
+Separable Natural Evolution Strategy algorithm in JavaScript.
+
 <img src="examples/rects-output.png" width="50%" />
 
-Separable Natural Evolution Strategy algorithm in JavaScript.
+> Mona Lisa in 200 rectangles, see [demo](./examples/rects/rects.js)
 
 ```js
 import SNES from "snes";
