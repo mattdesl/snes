@@ -1,6 +1,6 @@
 # snes
 
-![alt text](examples/rects-output.png)
+<img src="examples/rects-output.png" width="50%" />
 
 Separable Natural Evolution Strategy algorithm in JavaScript.
 
