@@ -15,7 +15,7 @@
     "vite": "^6.2.5"
   },
   "scripts": {
-    "test": "node test.js"
+    "rects": "vite dev examples/rects"
   },
   "keywords": [
     "nes",
