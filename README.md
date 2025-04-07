@@ -91,6 +91,18 @@ The current mean of the optimizer, i.e. the optimization result. This may not al
 - `optimizer.gaussian` (length `populationCount * solutionLength`)
 - `optimizer.prng` (you can use `prng.next()` and `prng.nextGaussian()` for random values)
 
+## From Source
+
+Clone the repo, cd into it and `npm install` dependencies, then you can run:
+
+```sh
+npm run rects
+```
+
+And open the localhost URL in your browser to see Mona Lisa painted in 200 rectangles.
+
+You can also test with `node examples/ascii.js` for a simple textual learning example.
+
 ## References
 
 - [Exponential Natural Evolution Strategies (2010) - T Glasmachers](https://people.idsia.ch/~juergen/xNES2010gecco.pdf)
