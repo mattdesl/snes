@@ -87,11 +87,9 @@ The current mean of the optimizer, i.e. the optimization result. This may not al
 
 ## References
 
-Using the following
-
 - [Exponential Natural Evolution Strategies (2010) - T Glasmachers](https://people.idsia.ch/~juergen/xNES2010gecco.pdf)
 - [Benchmarking Separable Natural Evolution Strategies on
-  the Noiseless and Noisy Black-box Optimization Testbeds](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&)doi=b49838b5393b9da9be8789115a850df5a2a64867
+  the Noiseless and Noisy Black-box Optimization Testbeds (2012) - T Schaul](https://dl.acm.org/doi/10.1145/2330784.2330815)
 - [pints](https://github.com/pints-team/pints)
 
 ## License
