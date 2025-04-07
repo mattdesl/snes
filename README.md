@@ -6,6 +6,8 @@ Separable Natural Evolution Strategy algorithm in JavaScript.
 
 > Mona Lisa in 200 rectangles, see [demo](./examples/rects/rects.js)
 
+## Quick Example
+
 ```js
 import SNES from "snes";
 
