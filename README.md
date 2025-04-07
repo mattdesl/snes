@@ -1,5 +1,7 @@
 # snes
 
+![alt text](examples/rects-output.png)
+
 Separable Natural Evolution Strategy algorithm in JavaScript.
 
 ```js
