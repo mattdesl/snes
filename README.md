@@ -77,9 +77,11 @@ Returns a flat array of solutions, strided by `solutionLength`. The total size o
 
 From a flat array of `solutions`, gets a subarray at slot `index`. Since this is a view of the flat array, it is not a copy, and so any changes to the flat array will also be present in this view. You should use `subarray.slice()` if you want a copy.
 
-### `optimizer.tell(fitnesses)`
+### `ranks = optimizer.tell(fitnesses)`
 
 Updates the parameters based on the list of fitnesses, which is expected to be parallel to the `solutions` array given by the `ask()` function. The size of this array should be `populationCount`.
+
+The return is a `ranks` array which gives the index of each fitness sorted from highest to lowest. This is a shallow copy of a re-used array, so if you want to store and modify the array you should use `ranks.slice()` beforehand.
 
 ### `optimizer.center`
 

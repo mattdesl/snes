@@ -9,10 +9,10 @@ export function getDefaultPopulationCount(solutionLength) {
 export default function sNES(opts = {}) {
   const {
     solutionLength,
-    // Population size (number of solutions)
-    populationCount = getDefaultPopulationCount(solutionLength),
     alpha = 0.05,
     etaCenter = 1,
+    // Population size (number of solutions)
+    populationCount = getDefaultPopulationCount(solutionLength),
     // alternative
     // https://people.idsia.ch/~juergen/xNES2010gecco.pdf
     // etaSigma = ((3 / 5) * (3 + Math.log(solutionLength))) /
@@ -20,6 +20,7 @@ export default function sNES(opts = {}) {
     // https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=b49838b5393b9da9be8789115a850df5a2a64867
     etaSigma = (3 + Math.log(solutionLength)) / (5 * Math.sqrt(solutionLength)),
     random = Math.random,
+    mirrored = false,
   } = opts;
 
   const state =
@@ -32,13 +33,7 @@ export default function sNES(opts = {}) {
 
   const prng = xorshift128(state);
 
-  const us = getWeightVector(populationCount);
-
-  // Initialize std deviation (sigma)
-  const sigma = new Float32Array(opts.sigma ?? solutionLength);
-  if (opts.sigma == null) sigma.fill(1);
-  // apply alpha to sigma
-  for (let i = 0; i < sigma.length; i++) sigma[i] = sigma[i] * alpha;
+  const utilities = getWeightVector(populationCount);
 
   // Initialize center (mu)
   const center = new Float32Array(opts.center ?? solutionLength);
@@ -47,12 +42,21 @@ export default function sNES(opts = {}) {
   for (let i = 0; i < populationCount; i++) indexArray[i] = i;
   const baseIndexArray = indexArray.slice();
 
-  const gausses = new Float32Array(populationCount * solutionLength);
   const solutions = new Float32Array(populationCount * solutionLength);
+
+  // Initialize std deviation (sigma)
+  const sigma = new Float32Array(opts.sigma ?? solutionLength);
+  if (opts.sigma == null) sigma.fill(1);
+  // apply alpha to sigma
+  for (let i = 0; i < sigma.length; i++) sigma[i] = sigma[i] * alpha;
+  const gausses = new Float32Array(populationCount * solutionLength);
 
   return {
     get populationCount() {
       return populationCount;
+    },
+    get solutionLength() {
+      return solutionLength;
     },
     get prng() {
       return prng;
@@ -74,18 +78,43 @@ export default function sNES(opts = {}) {
     tell,
   };
 
-  function generateGaussians() {
-    for (let i = 0; i < gausses.length; i++) {
-      gausses[i] = prng.nextGaussian();
-    }
-    return gausses;
-  }
-
   function ask() {
-    generateGaussians();
-    for (let i = 0, k = 0; i < populationCount; i++) {
-      for (let j = 0; j < solutionLength; j++, k++) {
-        solutions[k] = center[j] + sigma[j] * gausses[k];
+    if (mirrored) {
+      const half = Math.floor(populationCount / 2);
+      const stride = solutionLength;
+      const mirrorOffset = half * stride;
+      let k1 = 0; // write-pointer into solutions/gausses for first half
+      let k2 = mirrorOffset; // write-pointer for mirrored half
+
+      // Generate mirrored pairs
+      for (let i = 0; i < half; i++) {
+        for (let j = 0; j < stride; j++, k1++, k2++) {
+          const g = prng.nextGaussian();
+          gausses[k1] = g;
+          gausses[k2] = -g;
+          const mu = center[j];
+          const sig = sigma[j];
+          solutions[k1] = mu + sig * g;
+          solutions[k2] = mu - sig * g;
+        }
+      }
+
+      // If odd, generate one extra (unpaired) sample at the end
+      if (populationCount % 2 !== 0) {
+        const off = populationCount - 1;
+        let k = off * stride;
+        for (let j = 0; j < stride; j++, k++) {
+          const g = prng.nextGaussian();
+          gausses[k] = g;
+          solutions[k] = center[j] + sigma[j] * g;
+        }
+      }
+    } else {
+      for (let i = 0, k = 0; i < populationCount; i++) {
+        for (let j = 0; j < solutionLength; j++, k++) {
+          gausses[k] = prng.nextGaussian();
+          solutions[k] = center[j] + sigma[j] * gausses[k];
+        }
       }
     }
     return solutions;
@@ -106,24 +135,6 @@ export default function sNES(opts = {}) {
     }
   }
 
-  // function computeRanks(fitnesses) {
-  //   const ranks = new Uint16Array(populationCount);
-  //   for (let i = 0; i < populationCount; i++) {
-  //     let count = 0;
-  //     for (let j = 0; j < populationCount; j++) {
-  //       // Use a tie-breaker (e.g., index) to ensure a unique rank
-  //       if (
-  //         fitnesses[j] > fitnesses[i] ||
-  //         (fitnesses[j] === fitnesses[i] && j < i)
-  //       ) {
-  //         count++;
-  //       }
-  //     }
-  //     ranks[i] = count;
-  //   }
-  //   return ranks;
-  // }
-
   function tell(fitnesses) {
     if (fitnesses.length !== populationCount) {
       throw new Error("Mismatch between population size and fitness values.");
@@ -137,7 +148,6 @@ export default function sNES(opts = {}) {
 
     // or with builtin sort
     // indexArray.sort((a, b) => fitnesses[b] - fitnesses[a]);
-    // const ranks = computeRanks(fitnesses);
 
     // Update each parameter dimension
     for (let j = 0; j < solutionLength; j++) {
@@ -148,21 +158,17 @@ export default function sNES(opts = {}) {
         const idx = indexArray[i];
         const gaussIndex = idx * solutionLength + j;
         const noise = gausses[gaussIndex];
-        deltaMu += us[i] * noise;
-        deltaSigma += us[i] * (noise * noise - 1);
-
-        // const rank = ranks[i]; // rank 0 is best, 1 is second best, etc.
-        // const weight = us[rank];
-        // const gaussIndex = i * solutionLength + j;
-        // const noise = gausses[gaussIndex];
-        // deltaMu += weight * noise;
-        // deltaSigma += weight * (noise * noise - 1);
+        deltaMu += utilities[i] * noise;
+        deltaSigma += utilities[i] * (noise * noise - 1);
       }
       // Update center (mu)
       center[j] += etaCenter * sigma[j] * deltaMu;
+
       // Update sigma: multiplicative update via exponential
       sigma[j] *= Math.exp(0.5 * etaSigma * deltaSigma);
     }
+
+    return indexArray;
   }
 }
 
@@ -173,8 +179,7 @@ function getWeightVector(n) {
   const us = new Float32Array(n);
   let sumUs = 0;
   for (let i = 0; i < n; i++) {
-    let u = Math.log(n / 2 + 1) - Math.log(1 + i);
-    u = u < 0 ? 0 : u;
+    let u = Math.max(0, Math.log(n / 2 + 1) - Math.log(1 + i));
     us[i] = u;
     sumUs += u;
   }
