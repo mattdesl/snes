@@ -1,9 +1,9 @@
 import * as Color from "@texel/color";
-import { clamp, mapRange } from "canvas-sketch-util/math.js";
+import { clamp, degToRad, lerp, mapRange } from "canvas-sketch-util/math.js";
 
 export const paramCount = 128;
 export const colorCount = paramCount;
-export const paramDimensions = 6; // x,y,rad,shapeDetail
+export const paramDimensions = 6; // x,y,rad,rotation,sx,sy
 export const channels = 3;
 export const solutionLength =
   paramCount * paramDimensions + colorCount * channels;
@@ -11,8 +11,8 @@ export const globalAlpha = 1;
 
 // this choice may affect the optimizer, for example
 // if you use magenta it will try to optimize away the BG gaps
-// but if you use a color that may appear in the image, it may try to use it
-export const backgroundColor = "cyan";
+// but if you use a color that may appear in the target image, it will utilize it
+export const backgroundColor = "magenta";
 
 // we split the params into N scales
 // each scale is progressively smaller, so later circles have smaller radii
@@ -22,8 +22,8 @@ export const paramsPerScale = Math.floor(paramCount / numScales);
 
 // a linear scale
 const globalScale = Array(numScales)
-  .fill(0)
-  // .map((_, i) => Math.pow(0.5, i));
+  .fill(1)
+  // .map((_, i) => Math.pow(0.5, i)); // exponential
   .map((_, i, lst) => 1 - i / lst.length); // linear
 
 const tmp3 = [0, 0, 0];
@@ -65,15 +65,7 @@ export function drawSolution(
 
   const shapes = createShapes(solution, width, height);
   for (let shape of shapes) {
-    const {
-      scale,
-      color,
-      point,
-      shapeAngle = 0,
-      stretch,
-      layer,
-      sides = 4,
-    } = shape;
+    const { scale, color, point, shapeAngle = 0, stretch, sides = 4 } = shape;
     const radius = scale * Math.min(width, height);
     const sx = stretch[0];
     const sy = stretch[1];
@@ -81,25 +73,19 @@ export function drawSolution(
     for (let i = 0; i < sides; i++) {
       const angle = (i / sides) * Math.PI * 2 + Math.PI / 4;
 
-      // local (unrotated) point on circle
       let xL = Math.cos(angle) * radius;
       let yL = Math.sin(angle) * radius;
 
-      // 2) anisotropic (non-skew) scale in this local frame
       xL *= sx;
       yL *= sy;
 
-      // 3) rotate by shapeAngle, then translate
       const x =
         point[0] + xL * Math.cos(shapeAngle) - yL * Math.sin(shapeAngle);
       const y =
         point[1] + xL * Math.sin(shapeAngle) + yL * Math.cos(shapeAngle);
 
-      // const x = point[0] + Math.cos(angle) * radius;
-      // const y = point[1] + Math.sin(angle) * radius;
       context.lineTo(x, y);
     }
-    // context.arc(...point, radius, 0, Math.PI * 2);
     context.fillStyle = color;
     context.globalAlpha = globalAlpha;
     context.fill();
@@ -164,14 +150,19 @@ export function createShapes(solution, width, height) {
       // yet another alternative to tanh
       // sigmoid(params[i * paramDimensions + 0]) * width,
       // sigmoid(params[i * paramDimensions + 1]) * height,
-    ];
-    const shapeAngle = Math.tanh(params[i * paramDimensions + 3]) * Math.PI;
+    ]; // optional snap to grid
+    let shapeAngle = Math.tanh(params[i * paramDimensions + 3]) * Math.PI;
+
+    // optional snap to angle
+    // const snapAngle = degToRad(45);
+    // shapeAngle = Math.round(shapeAngle / snapAngle) * snapAngle;
+
     shapes.push({
       layer,
       shapeAngle,
       stretch: [
-        1, //Math.tanh(params[i * paramDimensions + 4]) * 0.5 + 0.5,
-        1, //Math.tanh(params[i * paramDimensions + 5]) * 0.5 + 0.5,
+        Math.tanh(params[i * paramDimensions + 4]) * 0.5 + 0.5,
+        Math.tanh(params[i * paramDimensions + 5]) * 0.5 + 0.5,
       ],
       scale: radiusScale,
       point,
@@ -181,6 +172,12 @@ export function createShapes(solution, width, height) {
     });
   }
   return shapes;
+}
+
+// can snap for e.g. the position or stretch
+function snapToGrid(value, count) {
+  const gridSize = 1 / count;
+  return Math.round(value / gridSize) * gridSize;
 }
 
 export function fitness(solution, tmpCanvas, tmpCtx, imageLab, W, H) {

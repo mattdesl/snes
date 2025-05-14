@@ -1,5 +1,5 @@
 import canvasSketch from "canvas-sketch";
-import imageUrl from "./monalisa.png";
+import imageUrl from "../monalisa.png";
 import SNES from "../../index.js";
 
 const settings = {

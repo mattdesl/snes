@@ -6,8 +6,7 @@ import {
   fitnessFromImageData,
 } from "./util.js";
 
-let targetOKLab;
-let width, height;
+let scales;
 let id;
 let solutionLength;
 let batchCount;
@@ -19,11 +18,13 @@ self.onmessage = (ev) => {
   if (data.type == "init") {
     id = data.id;
     solutionLength = data.solutionLength;
-    targetOKLab = data.targetOKLab;
-    width = data.width;
-    height = data.height;
+    // targetOKLab = data.targetOKLab;
+    // width = data.width;
+    // height = data.height;
     batchCount = data.batchCount;
+    scales = data.scales;
 
+    const { width, height } = scales[0]; // initial scale
     canvas = new OffscreenCanvas(width, height * batchCount);
     context = canvas.getContext("2d", {
       willReadFrequently: true,
@@ -34,6 +35,14 @@ self.onmessage = (ev) => {
   } else if (data.type === "ask") {
     const solutions = data.solutions; // batch of batchCount
     const fitness = new Float32Array(batchCount);
+    const scaleValue = data.scaleIndex || 0;
+    const { width, height, data: targetOKLab } = scales[scaleValue];
+
+    // new size
+    if (canvas.width !== width || canvas.height !== height * batchCount) {
+      canvas.width = width;
+      canvas.height = height * batchCount;
+    }
 
     clear(context, width, height * batchCount);
 

@@ -1,6 +1,6 @@
 import canvasSketch from "canvas-sketch";
 import Random from "canvas-sketch-util/random.js";
-import imageUrl from "./monalisa.png";
+import imageUrl from "../monalisa.png";
 import * as Color from "@texel/color";
 import sNES from "../../index.js";
 import {
@@ -14,8 +14,9 @@ import {
   convertRGBAToOKLab,
   backgroundColor,
 } from "./util.js";
+import { lerp } from "canvas-sketch-util/math.js";
 
-Random.setSeed("1234" || Random.getRandomSeed());
+Random.setSeed("" || Random.getRandomSeed());
 console.log(`seed: ${Random.getSeed()}`);
 
 const SHOULD_USE_WORKERS = true;
@@ -28,9 +29,16 @@ const settings = {
 };
 
 canvasSketch(async (props) => {
-  // the target size in pixels
-  const W = 64;
-  const H = 64;
+  const image = await loadImage(imageUrl);
+  const aspect = image.width / image.height;
+
+  // rescale the canvas to the image aspect
+  props.update({ dimensions: [props.width, Math.round(props.width / aspect)] });
+
+  const tmpCanvas = document.createElement("canvas");
+  const tmpCtx = tmpCanvas.getContext("2d", {
+    willReadFrequently: true,
+  });
 
   const populationCount = 24; // number of individuals
   const workerCount = 8; // number of threads
@@ -38,33 +46,37 @@ canvasSketch(async (props) => {
   const totalEpochs = 400;
   const alpha = 0.05; // learning rate
   const mirrored = true; // whether optimizer is antithetic
-  const renderScale = 0.5; // scale at which to draw on canvas
-  const showBest = true; // whether to show the best, or the mean
+  const renderScale = 0.6; // scale at which to draw on canvas
+  const showBest = false; // whether to show the best, or the mean
+  const scaleWidths = [64];
 
   // note: if globalAlpha is lower than 1 you'll probably
   // want to match this to the background color used during optimization
   const renderBackground = "tan";
 
-  const image = await loadImage(imageUrl, Math.min(W, H));
-  const aspect = image.width / image.height;
-
-  const tmpCanvas = document.createElement("canvas");
-  const tmpCtx = tmpCanvas.getContext("2d", {
-    willReadFrequently: true,
+  const scales = scaleWidths.map((width) => {
+    const height = Math.floor(width / aspect);
+    tmpCanvas.width = width;
+    tmpCanvas.height = height;
+    tmpCtx.drawImage(image, 0, 0, width, height);
+    const imageData = tmpCtx.getImageData(0, 0, width, height);
+    const imageLab = convertRGBAToOKLab(imageData.data);
+    return {
+      data: imageLab,
+      width,
+      height,
+    };
   });
 
-  props.update({ dimensions: [props.width, Math.round(props.width / aspect)] });
-
   let epoch = 0;
+  let scaleIndex = 0;
 
+  console.log(
+    "Scales:",
+    scales.map((s) => s.width)
+  );
   console.log("Population Count:", populationCount);
   console.log("Solution Length:", solutionLength);
-
-  tmpCanvas.width = W;
-  tmpCanvas.height = H;
-  tmpCtx.drawImage(image, 0, 0, W, H);
-  const imageData = tmpCtx.getImageData(0, 0, W, H);
-  const imageLab = convertRGBAToOKLab(imageData.data);
 
   const batchCount = populationCount / workerCount; // for workers only
   let workerPool;
@@ -82,10 +94,21 @@ canvasSketch(async (props) => {
   const bestSolution = new Float32Array(solutionLength);
   let bestFitness = -Infinity;
 
+  // Optionally we can bias the initial mean such as evenly spreading out
+  // the positions across the canvas
   for (let i = 0; i < paramCount; i++) {
-    // optimizer.center[i * paramDimensions + 0] = Random.gaussian();
+    // optimizer.center[i * paramDimensions + 0] = Random.gaussian(); // x, y
     // optimizer.center[i * paramDimensions + 1] = Random.gaussian();
-    // optimizer.center[i * paramDimensions + 2] = Random.gaussian();
+    // optimizer.center[i * paramDimensions + 2] = Random.gaussian(); // radius
+    // optimizer.center[i * paramDimensions + 3] = Random.gaussian(); // scale
+    // optimizer.center[i * paramDimensions + 4] = Random.pick([
+    //   -1, -0.5, 0, 0.5, 1,
+    // ]); // stretchX
+    // optimizer.center[i * paramDimensions + 5] = Random.pick([
+    //   -1, -0.5, 0, 0.5, 1,
+    // ]); // stretchY
+    // optimizer.sigma[i * paramDimensions + 4] = 0;
+    // optimizer.sigma[i * paramDimensions + 5] = 0;
   }
 
   let finished = false;
@@ -122,7 +145,9 @@ canvasSketch(async (props) => {
         context.textAlign = "left";
         context.textBaseline = "top";
         context.fillText(
-          `Epoch: ${epoch} / Fitness: ${bestFitness}`,
+          `Epoch: ${epoch} / Best Fitness: ${bestFitness.toFixed(2)} / Scale: ${
+            scales[scaleIndex].width
+          }px`,
           fontSize,
           fontSize
         );
@@ -139,6 +164,11 @@ canvasSketch(async (props) => {
 
   async function updateLoop() {
     if (epoch < totalEpochs) {
+      scaleIndex = Math.min(
+        scales.length - 1,
+        Math.floor((epoch / totalEpochs) * scales.length)
+      );
+
       for (let i = 0; i < stepsPerEpoch; i++) {
         if (useWorkers) {
           await updateAsync(optimizer);
@@ -180,9 +210,7 @@ canvasSketch(async (props) => {
       worker.postMessage({
         type: "init",
         id: i,
-        targetOKLab: imageLab,
-        width: W,
-        height: H,
+        scales,
         solutionLength,
         batchCount,
       });
@@ -205,6 +233,7 @@ canvasSketch(async (props) => {
       const batch = solutions.subarray(start, end);
       worker.postMessage({
         type: "ask",
+        scaleIndex,
         solutions: batch,
       });
     }
@@ -226,6 +255,8 @@ canvasSketch(async (props) => {
   }
 
   function udpateSync(optimizer) {
+    const { width: W, height: H, data: imageLab } = scales[scaleIndex];
+
     // evolve the searcher
     const solutions = optimizer.ask();
     for (let i = 0; i < optimizer.populationCount; i++) {
