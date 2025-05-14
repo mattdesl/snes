@@ -65,8 +65,8 @@ canvasSketch(async (props) => {
   console.log("Solution:", solutionLength);
 
   // for optimization purposes
-  const W = 128;
-  const H = 128;
+  const W = 64;
+  const H = 64;
 
   tmpCanvas.width = W;
   tmpCanvas.height = H;
@@ -127,7 +127,7 @@ canvasSketch(async (props) => {
   }
 
   const optimizer = sNES({
-    mirrored: false,
+    mirrored: true,
     populationCount,
     solutionLength,
     alpha,
@@ -197,11 +197,9 @@ canvasSketch(async (props) => {
     }
 
     // now we wait for all to be ready
-    const fitnessChunks = (
-      await Promise.all(
-        workerPool.map((worker) => waitForMessageType(worker, "tell"))
-      )
-    ).sort(sortAscendingID);
+    const fitnessChunks = await Promise.all(
+      workerPool.map((worker) => waitForMessageType(worker, "tell"))
+    );
 
     // now we un-chunk the fitnesses into the final array
     for (let i = 0; i < fitnessChunks.length; i++) {
