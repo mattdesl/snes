@@ -17,8 +17,7 @@
     "vite": "^6.2.5"
   },
   "scripts": {
-    "test-asc": "asc ./examples/zig/snes.ts -b -O3 --optimize --sourceMap --outFile=./examples/zig/snes.wasm",
-    "test-zig": "zig build-exe ./examples/zig/snes.zig -target wasm32-freestanding -fno-entry -rdynamic -OReleaseSmall -femit-bin=./examples/zig/snes.wasm",
+    "workers": "vite dev examples/workers",
     "rects": "vite dev examples/rects"
   },
   "keywords": [
