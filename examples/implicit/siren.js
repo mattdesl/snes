@@ -79,7 +79,7 @@ function triangle(x) {
 export function makeSineLayer(inDim, outDim, omega0 = 1.0, isFinal = false) {
   const W = new Float32Array(inDim * outDim);
   const b = new Float32Array(outDim);
-  const Wq = new Float32Array(W.length);
+  // const Wq = new Float32Array(W.length);
 
   function initialize(isFirst = false) {
     const scale = isFirst ? 1.0 / inDim : Math.sqrt(6.0 / inDim) / omega0;
@@ -90,7 +90,7 @@ export function makeSineLayer(inDim, outDim, omega0 = 1.0, isFinal = false) {
   }
 
   function forward(x, out) {
-    // quantizeTernary(W, 0.05, Wq);
+    // const Wq = quantizeTernary(W, 0.01);
     const Wq = W;
     let ptrW = 0;
     for (let j = 0; j < outDim; j++) {
@@ -103,9 +103,11 @@ export function makeSineLayer(inDim, outDim, omega0 = 1.0, isFinal = false) {
   }
 
   function quantize(thresh = 0.05) {
-    const Wq = quantizeTernary(W, thresh);
     for (let i = 0; i < W.length; i++) {
-      W[i] = Wq[i];
+      W[i] = W[i] > thresh ? 1 : W[i] < -thresh ? -1 : 0;
+    }
+    for (let i = 0; i < b.length; i++) {
+      b[i] = b[i] > thresh ? 1 : b[i] < -thresh ? -1 : 0;
     }
   }
 

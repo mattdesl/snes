@@ -46,66 +46,33 @@ function kaleido(u, v, N = 6) {
 }
 
 canvasSketch(async (props) => {
-  const DIM = 32;
+  const DIM = 16;
 
   const tmpCanvas = document.createElement("canvas");
   const tmpCtx = tmpCanvas.getContext("2d", {
     willReadFrequently: true,
   });
-
-  const downscale = 32;
-  const targetSize = DIM * downscale;
-  tmpCanvas.width = targetSize;
-  tmpCanvas.height = targetSize;
-
-  const glyphs = "&".split("");
-
-  const glyphSDFs = glyphs.map((glyph) => {
-    const fontScale = 1;
-    tmpCtx.fillStyle = "white";
-    tmpCtx.fillRect(0, 0, targetSize, targetSize);
-    tmpCtx.font = `${targetSize * fontScale}px "Andale Mono", monospace`;
-    tmpCtx.textAlign = "center";
-    tmpCtx.textBaseline = "middle";
-    tmpCtx.fillStyle = "black";
-    tmpCtx.fillText(glyph, targetSize / 2, targetSize / 2 + targetSize / 32);
-
-    const targetData = tmpCtx.getImageData(0, 0, targetSize, targetSize);
-    const sdfData = sdf(targetData.data, targetSize, targetSize, {
-      spread: DIM,
-      downscale,
-    });
-
-    const tmpCanvas2 = document.createElement("canvas");
-    const tmpCtx2 = tmpCanvas2.getContext("2d", {
-      willReadFrequently: true,
-    });
-    tmpCanvas2.width = DIM;
-    tmpCanvas2.height = DIM;
-    tmpCtx2.drawImage(tmpCanvas, 0, 0, DIM, DIM);
-    const imageData = tmpCtx2.getImageData(0, 0, DIM, DIM);
-    const imageL = new Float32Array(DIM * DIM);
-    const pixelCount = DIM * DIM;
-    for (let i = 0; i < pixelCount; i++) {
-      imageL[i] = imageData.data[i * 4] / 255;
+  const image = await loadImage(imageUrl, DIM);
+  tmpCanvas.width = DIM;
+  tmpCanvas.height = DIM;
+  tmpCtx.drawImage(image, 0, 0, DIM, DIM);
+  const imageData = tmpCtx.getImageData(0, 0, DIM, DIM);
+  const targetImageDataNormalized = new Float32Array(DIM * DIM * 3);
+  const pixelCount = DIM * DIM;
+  for (let i = 0; i < pixelCount; i++) {
+    for (let j = 0; j < 3; j++) {
+      const color = imageData.data[i * 4 + j];
+      targetImageDataNormalized[i * 3 + j] = color / 0xff;
     }
+  }
 
-    return {
-      L: imageL,
-      sdf: sdfData,
-    };
-  });
-
-  // const image = await loadImage(imageUrl, DIM);
-  // tmpCanvas.width = DIM;
-  // tmpCanvas.height = DIM;
-  // tmpCtx.drawImage(image, 0, 0, DIM, DIM);
-  // const imageData = tmpCtx.getImageData(0, 0, DIM, DIM);
   // const imageLab = convertRGBAToOKLab(imageData.data);
 
   // const inputSize = l1Embed(0, 0).length;
   const inputSize = 2;
-  const outputSize = 1;
+  const hiddenSize = 16;
+  const hiddenLayerCount = 2;
+  const outputSize = 3;
   const stepsPerFrame = 5;
   // const ffnBands = 16;
 
@@ -115,7 +82,16 @@ canvasSketch(async (props) => {
   //   30
   // );
 
-  const net = makeSirenNetwork([inputSize, 16, 16, outputSize], 30);
+  const net = makeSirenNetwork(
+    [
+      inputSize,
+      ...Array(hiddenLayerCount)
+        .fill()
+        .map(() => hiddenSize),
+      outputSize,
+    ],
+    DIM / 2
+  );
 
   // 2) Initialize weights
   net.initialize();
@@ -175,22 +151,8 @@ canvasSketch(async (props) => {
   window.quant = (t) => {};
   window.stop = () => (stopped = true);
 
-  // can snap for e.g. the position or stretch
-  function snapToGrid(value, count) {
-    const gridSize = 1 / count;
-    return Math.round(value / gridSize) * gridSize;
-  }
-
   const forward = (ux, uy, param = 0, out = tmpOutput) => {
     // const uv = [ux, uy];
-
-    // const radSnapCount = 2;
-    // rad = snapToGrid(rad, radSnapCount);
-
-    let angle = Math.atan(uy / ux);
-    // const angleSnap = Math.PI / 8;
-    // angle = Math.round(angle / angleSnap) * angleSnap;
-
     const rad = Math.hypot(ux, uy);
     // const rad = Math.abs(ux) + Math.abs(uy);
     // const rad = Math.max(Math.abs(ux), Math.abs(uy));
@@ -204,6 +166,7 @@ canvasSketch(async (props) => {
     // const pt = [ux + ox, uy + oy, rad, param];
 
     const x = [ux, uy];
+
     if (x.length !== inputSize) throw new Error("Invalid input size");
 
     // let ffnInput = new Array(ffnBands * 2);
@@ -218,9 +181,7 @@ canvasSketch(async (props) => {
     //   ffnInput[2 * i + 1] = Math.cos(angle);
     // }
 
-    net.forward(x, out);
-
-    return out;
+    return net.forward(x, out);
   };
 
   function morphBandLimited(dA, dB, t, δ = 0.1) {
@@ -243,11 +204,7 @@ canvasSketch(async (props) => {
       context.fillStyle = "white";
       context.fillRect(0, 0, width, height);
 
-      // contour parameters
-      const levels = 4; // number of contour lines
-      const lineWidth = 0.1; // thickness in "height" units
-
-      // const renderSize = DIM * 8;
+      // const renderSize = DIM * 1;
       const renderSize = useGrid ? DIM * 8 : width / 4;
       let xCount = renderSize;
       let yCount = xCount;
@@ -258,7 +215,7 @@ canvasSketch(async (props) => {
       const paramT = 0;
 
       const grid = useGrid
-        ? drawToSDF(optimizer.center, DIM, tmpDimOut, paramT)
+        ? drawToImage(optimizer.center, DIM, tmpDimOut, paramT)
         : null;
       for (let y = 0; y < yCount; y++) {
         for (let x = 0; x < xCount; x++) {
@@ -269,28 +226,25 @@ canvasSketch(async (props) => {
           const ui = Math.floor(u * DIM);
           const vi = Math.floor(v * DIM);
           const sdfIdx = ui + vi * DIM;
-
+          let r, g, b;
           if (useGrid) {
-            for (let j = 0; j < outputSize; j++) {
-              tmpOutput[j] = sample(u, v, grid, DIM, DIM, outputSize, j);
-            }
+            // d = sample(u, v, grid, DIM, DIM);
+            r = grid[sdfIdx * outputSize + 0];
+            g = grid[sdfIdx * outputSize + 1];
+            b = grid[sdfIdx * outputSize + 2];
           } else {
-            forward(u * 2 - 1, v * 2 - 1, paramT, tmpOutput);
+            [r, g, b] = forward(u * 2 - 1, v * 2 - 1, paramT);
           }
-
-          let d;
-          if (outputSize == 1) d = tmpOutput[0];
-          else d = median(tmpOutput);
 
           // const N = 4;
           // const idx = Math.floor(d * N); // 0,1,2,3
           // const Lq = idx / (N - 1); // 0, 1/3, 2/3, 1
+          // const Lq = d;
 
-          const a = 0,
-            b = 0;
-          const thres = 0.05;
-          const alpha = 0.0;
-          const Lq = d;
+          // const a = 0,
+          //   b = 0;
+          // const thres = 0.05;
+          // const alpha = 0.0;
 
           // // scale into [0..levels]
           // const vScaled = d * levels;
@@ -303,8 +257,9 @@ canvasSketch(async (props) => {
           // const L = isLine ? 1 : 0;
 
           // const L = d;
-          const L = smoothstep(alpha - thres, alpha + thres, Lq);
-          const color = Color.serialize([L, a, b], Color.OKLab, Color.sRGB);
+          // const L = smoothstep(alpha - thres, alpha + thres, Lq);
+          // const color = Color.serialize([L, a, b], Color.OKLab, Color.sRGB);
+          const color = Color.serialize([r, g, b], Color.sRGB);
           context.fillStyle = color;
           context.fillRect(
             x * cellWidth,
@@ -316,29 +271,8 @@ canvasSketch(async (props) => {
       }
     },
   };
-
-  // function median(r, g, b) {
-  //   return Math.max(Math.min(r, g), Math.min(Math.max(r, g), b));
-  // }
-
-  // Utility: compute the median of an array (arbitrary length)
-  // arr: Array or TypedArray of numeric values
-  // returns the median value (float)
-  function median(arr) {
-    const a = Array.from(arr);
-    const n = a.length;
-    if (n === 0) return NaN;
-    a.sort((x, y) => x - y);
-    const mid = Math.floor(n / 2);
-    if (n % 2 === 1) {
-      return a[mid];
-    } else {
-      return (a[mid - 1] + a[mid]) / 2;
-    }
-  }
-
   // helper: bilinear sample (u,v) in [0,1]
-  function sample(u, v, sdf, w, h, stride = 1, off = 0) {
+  function sample(u, v, sdf, w, h) {
     // map to [0 .. w-1], [0 .. h-1]
     const x = u * (w - 1),
       y = v * (h - 1);
@@ -349,17 +283,17 @@ canvasSketch(async (props) => {
     const fx = x - x0,
       fy = y - y0;
     // fetch four
-    const i00 = sdf[(y0 * w + x0) * stride + off],
-      i10 = sdf[(y0 * w + x1) * stride + off],
-      i01 = sdf[(y1 * w + x0) * stride + off],
-      i11 = sdf[(y1 * w + x1) * stride + off];
+    const i00 = sdf[y0 * w + x0],
+      i10 = sdf[y0 * w + x1],
+      i01 = sdf[y1 * w + x0],
+      i11 = sdf[y1 * w + x1];
     // lerp in x, then y
     const ix0 = i00 + (i10 - i00) * fx;
     const ix1 = i01 + (i11 - i01) * fx;
     return ix0 + (ix1 - ix0) * fy;
   }
 
-  function drawToSDF(
+  function drawToImage(
     solution,
     dimensions = DIM,
     out = tmpDimOut,
@@ -403,40 +337,24 @@ canvasSketch(async (props) => {
 
   function fitness(solution, dimensions = DIM) {
     let error = 0;
-    for (let p = 0; p < glyphSDFs.length; p++) {
-      const raw = drawToSDF(solution, dimensions, tmpDimOut, p);
-      const { sdf: glyphSDF, L } = glyphSDFs[p];
-      const pixelCount = dimensions * dimensions;
-      for (let i = 0; i < pixelCount; i++) {
-        const idx = i * outputSize;
-        const d =
-          outputSize == 1
-            ? raw[idx]
-            : median([raw[idx + 0], raw[idx + 1], raw[idx + 2]]);
-        const threshold = 0.05;
-        const alpha = 0;
-        // computed lightness
-        const cL = smoothstep(alpha - threshold, alpha + threshold, d);
-        // target lightness
-        const tL = L[i];
-        const diff = cL - tL;
-        error += diff * diff;
-
-        if (outputSize == 1) {
-          const dSDF = glyphSDF[i];
-          const diffSDF = d - dSDF;
-          error += diffSDF * diffSDF;
-        }
-      }
-      error /= pixelCount / (outputSize == 1 ? 2 : 1);
-
-      // const imageDim =
-      // debugger;
-      // for (let i = 0; i < raw.length; i++) {
-
-      // }
+    const raw = drawToImage(solution, dimensions, tmpDimOut);
+    const pixelCount = raw.length / outputSize;
+    for (let i = 0; i < pixelCount; i++) {
+      error += distanceSqr(raw, targetImageDataNormalized, i, outputSize);
     }
-    return -error / glyphSDFs.length;
+    return -error;
+  }
+
+  function distanceSqr(arrayA, arrayB, baseIndex, channels) {
+    let error = 0;
+    for (let i = 0; i < channels; i++) {
+      const idx = baseIndex * channels + i;
+      const a = arrayA[idx];
+      const b = arrayB[idx];
+      const d = a - b;
+      error += d * d;
+    }
+    return error;
   }
 
   function quantizeArray(arr, bits) {
