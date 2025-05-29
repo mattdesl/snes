@@ -161,6 +161,7 @@ export default function sNES(opts = {}) {
         deltaMu += utilities[i] * noise;
         deltaSigma += utilities[i] * (noise * noise - 1);
       }
+
       // Update center (mu)
       center[j] += etaCenter * sigma[j] * deltaMu;
 

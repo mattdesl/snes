@@ -1,11 +1,9 @@
+// This example is still a WIP
 import canvasSketch from "canvas-sketch";
 import * as Color from "@texel/color";
 import Random from "canvas-sketch-util/random.js";
 import sNES from "../../index.js";
-import { makeSineLayer, makeSirenNetwork } from "./siren.js";
-import { makeFFNNetwork } from "./ffn.js";
-import imageUrl from "../monalisa.png";
-import { convertRGBAToOKLab, loadImage } from "../util.js";
+import { makeSirenNetwork } from "./siren.js";
 import { smoothstep } from "canvas-sketch-util/math.js";
 import { sdf } from "./sdf.js";
 Random.setSeed("1234" || Random.getRandomSeed());
@@ -17,34 +15,6 @@ const settings = {
   animate: true,
 };
 
-function l1Embed(u, v) {
-  const feats = [];
-  for (let [nx, ny] of normals) {
-    const d = nx * u + ny * v;
-    feats.push(Math.abs(d));
-  }
-  return feats; // → [|u|, |v|, |(u+v)/√2|, |(u–v)/√2|]
-}
-
-function planeSDF(u, v, offsets) {
-  let d = Infinity;
-  for (let j = 0; j < P; j++) {
-    const [nx, ny] = normals[j];
-    d = Math.min(d, nx * u + ny * v + offsets[j]);
-  }
-  return d;
-}
-
-function kaleido(u, v, N = 6) {
-  // convert to polar
-  const θ = Math.atan2(v, u);
-  const r = Math.hypot(u, v);
-  // fold θ into [–π/N, +π/N]
-  const sector = ((θ + Math.PI / N) % ((2 * Math.PI) / N)) - Math.PI / N;
-  // reconstruct coords
-  return [r * Math.cos(sector), r * Math.sin(sector)];
-}
-
 canvasSketch(async (props) => {
   const DIM = 32;
 
@@ -53,14 +23,18 @@ canvasSketch(async (props) => {
     willReadFrequently: true,
   });
 
+  const positionJitter = 0.0;
   const downscale = 32;
   const targetSize = DIM * downscale;
   tmpCanvas.width = targetSize;
   tmpCanvas.height = targetSize;
 
-  const glyphs = "&".split("");
+  const glyphs = "A".split("");
 
-  const glyphSDFs = glyphs.map((glyph) => {
+  if (glyphs.length > 2)
+    throw new Error("only supports 1 or 2 glyphs currently");
+
+  const glyphSDFs = glyphs.map((glyph, i, lst) => {
     const fontScale = 1;
     tmpCtx.fillStyle = "white";
     tmpCtx.fillRect(0, 0, targetSize, targetSize);
@@ -89,38 +63,26 @@ canvasSketch(async (props) => {
     for (let i = 0; i < pixelCount; i++) {
       imageL[i] = imageData.data[i * 4] / 255;
     }
-
     return {
+      param: lst.length <= 1 ? 0 : i / (lst.length - 1),
       L: imageL,
       sdf: sdfData,
     };
   });
 
-  // const image = await loadImage(imageUrl, DIM);
-  // tmpCanvas.width = DIM;
-  // tmpCanvas.height = DIM;
-  // tmpCtx.drawImage(image, 0, 0, DIM, DIM);
-  // const imageData = tmpCtx.getImageData(0, 0, DIM, DIM);
-  // const imageLab = convertRGBAToOKLab(imageData.data);
-
-  // const inputSize = l1Embed(0, 0).length;
-  const inputSize = 2;
+  const inputParamCount = glyphSDFs.length === 1 ? 0 : 1;
+  const inputSize = 3 + inputParamCount; // (x, y, radius, [param])
   const outputSize = 1;
   const stepsPerFrame = 5;
-  // const ffnBands = 16;
-
-  // 1) Create a 2D→1D SIREN net with two 256-unit hidden layers
-  // const net = makeSirenNetwork(
-  //   [inputSize, hiddenSize, hiddenSize, outputSize],
-  //   30
-  // );
+  let epoch = 0;
+  const maxEpoch = 5000;
 
   const net = makeSirenNetwork([inputSize, 16, 16, outputSize], 30);
 
   // 2) Initialize weights
   net.initialize();
 
-  const populationCount = 8;
+  const populationCount = 12;
   const solutionLength = net.packParams().length;
 
   console.log("Image Size:", DIM * DIM);
@@ -132,13 +94,6 @@ canvasSketch(async (props) => {
     alpha: 0.01,
     random: Random.value,
   });
-
-  // const ffnScale = 1;
-  // const ffnB = new Array(ffnBands).fill().map(() => {
-  //   return Array(inputSize)
-  //     .fill()
-  //     .map(() => optimizer.prng.nextGaussian() * ffnScale);
-  // });
 
   optimizer.center.set(net.packParams());
 
@@ -163,79 +118,78 @@ canvasSketch(async (props) => {
       ev.preventDefault();
       param = param === 0 ? 1 : 0;
       console.log("param", param);
-    } else if (ev.key == "n") {
-      ev.preventDefault();
-      const glsl = generateShadertoyGLSL(net);
-      window.glsl = glsl;
-      console.log("GLSL", glsl);
     }
   });
 
   let stopped = false;
   window.quant = (t) => {};
   window.stop = () => (stopped = true);
+  window.generateGLSL = () => generateShadertoyGLSL(net, glyphSDFs.length);
 
-  // can snap for e.g. the position or stretch
-  function snapToGrid(value, count) {
-    const gridSize = 1 / count;
-    return Math.round(value / gridSize) * gridSize;
-  }
+  const button = document.createElement("button");
+  let buttonTimer = null;
+  button.style.cssText = `
+position: absolute; top: 20px; left: 20px`;
+  const copyTxt = "Copy GLSL to Clipboard";
+  button.textContent = copyTxt;
+  document.body.appendChild(button);
 
-  const forward = (ux, uy, param = 0, out = tmpOutput) => {
-    // const uv = [ux, uy];
+  const setButtonText = (msg) => {
+    clearTimeout(buttonTimer);
+    button.textContent = msg;
 
-    // const radSnapCount = 2;
-    // rad = snapToGrid(rad, radSnapCount);
-
-    let angle = Math.atan(uy / ux);
-    // const angleSnap = Math.PI / 8;
-    // angle = Math.round(angle / angleSnap) * angleSnap;
-
-    const rad = Math.hypot(ux, uy);
-    // const rad = Math.abs(ux) + Math.abs(uy);
-    // const rad = Math.max(Math.abs(ux), Math.abs(uy));
-    // const ang = Math.atan2(uy, ux);
-    // const [ox, oy] = Random.insideCircle(Random.gaussian(0, 0.01));
-    // const pt = [ux + ox, uy + oy, 0];
-    // const pt = [ux + ox, uy + oy, param * 2 - 1];
-
-    // const [ox, oy] = [0, 0];
-    // const pt = l1Embed(ux, uy);
-    // const pt = [ux + ox, uy + oy, rad, param];
-
-    const x = [ux, uy];
-    if (x.length !== inputSize) throw new Error("Invalid input size");
-
-    // let ffnInput = new Array(ffnBands * 2);
-    // for (let i = 0; i < ffnBands; i++) {
-    //   // compute dot(B[i], x)
-    //   let dot = 0;
-    //   for (let j = 0; j < inputSize; j++) {
-    //     dot += ffnB[i][j] * x[j];
-    //   }
-    //   const angle = 2 * Math.PI * dot;
-    //   ffnInput[2 * i] = Math.sin(angle);
-    //   ffnInput[2 * i + 1] = Math.cos(angle);
-    // }
-
-    net.forward(x, out);
-
-    return out;
+    buttonTimer = setTimeout(() => {
+      button.textContent = copyTxt;
+    }, 1000);
   };
 
-  function morphBandLimited(dA, dB, t, δ = 0.1) {
-    // if we're "far" from both surfaces, just union them
-    if (dA > δ && dB > δ) {
-      // outside both glyphs
-      return Math.min(dA, dB);
+  button.onclick = async () => {
+    try {
+      clipboardCopy(generateShadertoyGLSL(net, glyphSDFs.length));
+      setButtonText("Copied to clipboard!");
+    } catch (err) {
+      alert(err.message);
     }
-    if (dA < -δ && dB < -δ) {
-      // deep inside both glyphs
-      return Math.max(dA, dB);
+
+    // var element = document.createElement('a');
+    // element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(generateGLSL));
+    // element.setAttribute('download', filename);
+
+    // element.style.display = 'none';
+    // document.body.appendChild(element);
+
+    // element.click();
+
+    // document.body.removeChild(element);
+  };
+
+  const forward = (ux, uy, param = 0, out = tmpOutput, jitter = 1) => {
+    const [ox, oy] = Random.insideCircle(
+      Random.gaussian(0, jitter * positionJitter)
+    );
+    ux += ox;
+    uy += oy;
+
+    // euclidean
+    const rad = Math.hypot(ux, uy);
+
+    // manhattan
+    // const rad = Math.abs(ux) + Math.abs(uy);
+
+    const x = [ux, uy, rad];
+
+    // alternatively, pass in only angles
+    // const thetas = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
+    // const di = thetas.map((θ) => ux * Math.cos(θ) + uy * Math.sin(θ));
+    // const x = [...di, rad];
+
+    if (glyphSDFs.length == 2) {
+      x.push(param > 0.5 ? 1 : -1);
     }
-    // near at least one surface, blend softly
-    return dA * (1 - t) + dB * t;
-  }
+    if (x.length !== inputSize) throw new Error("Invalid input size");
+    net.forward(x, out);
+    return out;
+  };
 
   return {
     render({ exporting, time, context, width, height }) {
@@ -243,8 +197,6 @@ canvasSketch(async (props) => {
       context.fillStyle = "white";
       context.fillRect(0, 0, width, height);
 
-      // contour parameters
-      const levels = 4; // number of contour lines
       const lineWidth = 0.1; // thickness in "height" units
 
       // const renderSize = DIM * 8;
@@ -254,8 +206,8 @@ canvasSketch(async (props) => {
       const cellWidth = width / xCount;
       const cellHeight = height / yCount;
 
+      const paramT = param;
       // const paramT = useGrid ? param : Math.sin(time / 2) * 0.5 + 0.5;
-      const paramT = 0;
 
       const grid = useGrid
         ? drawToSDF(optimizer.center, DIM, tmpDimOut, paramT)
@@ -268,41 +220,24 @@ canvasSketch(async (props) => {
           const v = yCount <= 1 ? 0.5 : y / (yCount - 1);
           const ui = Math.floor(u * DIM);
           const vi = Math.floor(v * DIM);
-          const sdfIdx = ui + vi * DIM;
 
           if (useGrid) {
             for (let j = 0; j < outputSize; j++) {
               tmpOutput[j] = sample(u, v, grid, DIM, DIM, outputSize, j);
             }
           } else {
-            forward(u * 2 - 1, v * 2 - 1, paramT, tmpOutput);
+            forward(u * 2 - 1, v * 2 - 1, paramT, tmpOutput, 0);
           }
 
           let d;
           if (outputSize == 1) d = tmpOutput[0];
           else d = median(tmpOutput);
 
-          // const N = 4;
-          // const idx = Math.floor(d * N); // 0,1,2,3
-          // const Lq = idx / (N - 1); // 0, 1/3, 2/3, 1
-
           const a = 0,
             b = 0;
           const thres = 0.05;
           const alpha = 0.0;
           const Lq = d;
-
-          // // scale into [0..levels]
-          // const vScaled = d * levels;
-
-          // // fractional distance to nearest integer, centered at 0
-          // const f = Math.abs((vScaled % 1) - 0.5);
-
-          // // draw a line when f < (lineWidth/2)
-          // const isLine = f < lineWidth / 2;
-          // const L = isLine ? 1 : 0;
-
-          // const L = d;
           const L = smoothstep(alpha - thres, alpha + thres, Lq);
           const color = Color.serialize([L, a, b], Color.OKLab, Color.sRGB);
           context.fillStyle = color;
@@ -317,13 +252,8 @@ canvasSketch(async (props) => {
     },
   };
 
-  // function median(r, g, b) {
-  //   return Math.max(Math.min(r, g), Math.min(Math.max(r, g), b));
-  // }
-
   // Utility: compute the median of an array (arbitrary length)
   // arr: Array or TypedArray of numeric values
-  // returns the median value (float)
   function median(arr) {
     const a = Array.from(arr);
     const n = a.length;
@@ -368,12 +298,6 @@ canvasSketch(async (props) => {
     let xCount = dimensions;
     let yCount = xCount;
 
-    // // quantize
-    // const { max, quantized } = quantizeArray(solution, 8);
-    // const solSlice = solution.slice();
-    // for (let i = 0; i < solution.length; i++) {
-    //   solSlice[i] = quantized[i] / max;
-    // }
     net.unpackParams(solution); // load
 
     for (let y = 0; y < yCount; y++) {
@@ -390,7 +314,7 @@ canvasSketch(async (props) => {
         // const pt = [Math.atan2(uy, ux), Math.hypot(ux, uy)];
 
         // net.forward(pt, tmpOutput);
-        forward(ux, uy, glyphSDFParam, tmpOutput);
+        forward(ux, uy, glyphSDFParam, tmpOutput, 1);
         const pixelIndex = x + y * xCount;
         for (let i = 0; i < outputSize; i++) {
           const a = tmpOutput[i];
@@ -403,8 +327,11 @@ canvasSketch(async (props) => {
 
   function fitness(solution, dimensions = DIM) {
     let error = 0;
+    // const curGlyphs = Random.shuffle(glyphSDFs);
+
     for (let p = 0; p < glyphSDFs.length; p++) {
-      const raw = drawToSDF(solution, dimensions, tmpDimOut, p);
+      const pT = p;
+      const raw = drawToSDF(solution, dimensions, tmpDimOut, pT);
       const { sdf: glyphSDF, L } = glyphSDFs[p];
       const pixelCount = dimensions * dimensions;
       for (let i = 0; i < pixelCount; i++) {
@@ -428,7 +355,7 @@ canvasSketch(async (props) => {
           error += diffSDF * diffSDF;
         }
       }
-      error /= pixelCount / (outputSize == 1 ? 2 : 1);
+      // error /= pixelCount / (outputSize == 1 ? 2 : 1);
 
       // const imageDim =
       // debugger;
@@ -436,23 +363,12 @@ canvasSketch(async (props) => {
 
       // }
     }
-    return -error / glyphSDFs.length;
-  }
-
-  function quantizeArray(arr, bits) {
-    const scale = 2 ** (bits - 1) - 1; // e.g. 127 for 8-bit
-    const n = arr.length;
-    const quantized = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      // e.g. scale = 255:  -0.002312 → round(-0.002312 * 255) = -1
-      quantized[i] = Math.round(arr[i] * scale);
-    }
-    return { max: scale, quantized };
+    return -error;
   }
 
   function update(dimensions = DIM) {
     if (stopped) return;
-    for (let i = 0; i < stepsPerFrame; i++) {
+    for (let i = 0; i < stepsPerFrame && epoch < maxEpoch; i++) {
       // evolve the searcher
       const solutions = optimizer.ask();
 
@@ -461,11 +377,12 @@ canvasSketch(async (props) => {
         fitnesses[i] = fitness(solution, dimensions);
       }
       optimizer.tell(fitnesses);
+      epoch++;
     }
   }
   // Dynamically generate a fully-unrolled GLSL shader for a 4-input SIREN (x, y, radius, param)
   // with w0 cached in the shader.
-  function generateShadertoyGLSL(net) {
+  function generateShadertoyGLSL(net, glyphCount = 1) {
     const { dims, w0 } = net;
     const params = net.packParams();
     let offset = 0;
@@ -539,10 +456,11 @@ canvasSketch(async (props) => {
     }
 
     glsl += `  return out_0;
-}\n\n`;
+}\n`;
 
     // 4) Shadertoy mainImage with radius and paramT
-    glsl += /*glsl*/ `
+    if (glyphCount == 2) {
+      glsl += /*glsl*/ `
 float morphBandLimited(float dA, float dB, float t, float K) {
     // if we're "far" from both surfaces, just union them
     if (dA > K && dB > K) {
@@ -566,12 +484,28 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   float rad = length(uv);
   float paramT = smoothstep(0.0, 1.0, sin(iTime));
   float d = morphBandLimited(
-    siren_forward(uv.x, -uv.y, rad, 0.0),
+    siren_forward(uv.x, -uv.y, rad, -1.0),
     siren_forward(uv.x, -uv.y, rad, 1.0), paramT, 1.5);
   
   float v = smoothstep(0.0, fwidth(length(uv))*16.0, d);
   fragColor = vec4(vec3(v), 1.0);
 }`;
+    } else if (glyphCount == 1) {
+      glsl += /*glsl*/ `
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+  vec2 uv = fragCoord.xy / iResolution.xy;
+  uv = uv * 2.0 - 1.0;
+  uv.x *= iResolution.x / iResolution.y;
+  uv = clamp(uv, -1.0, 1.0);
+  
+  float rad = length(uv);
+  float d = siren_forward(uv.x, -uv.y, rad, -1.0);
+  float v = smoothstep(0.0, fwidth(length(uv))*16.0, d);
+  fragColor = vec4(vec3(v), 1.0);
+}`;
+    } else {
+      throw new Error("no support for glyphCount > 2");
+    }
 
     return glsl;
   }
@@ -579,4 +513,64 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
 export function sigmoid(x) {
   return 1 / (1 + Math.exp(-x));
+}
+
+async function clipboardCopy(value) {
+  if (!value) return false;
+  if (navigator.clipboard) {
+    await navigator.clipboard.writeText(value);
+  } else {
+    fallbackCopyTextToClipboard(value);
+  }
+  return true;
+}
+
+function fallbackCopyTextToClipboard(string) {
+  let textarea;
+  let result;
+
+  try {
+    textarea = document.createElement("textarea");
+    textarea.setAttribute("readonly", true);
+    textarea.setAttribute("contenteditable", true);
+    textarea.style.position = "fixed"; // prevent scroll from jumping to the bottom when focus is set.
+    textarea.style.top = "-99999px";
+    textarea.style.left = "-99999px";
+    textarea.value = string;
+
+    document.body.appendChild(textarea);
+
+    textarea.focus();
+    textarea.select();
+
+    const range = document.createRange();
+    range.selectNodeContents(textarea);
+
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    textarea.setSelectionRange(0, textarea.value.length);
+    result = document.execCommand("copy");
+  } catch (err) {
+    console.error(err);
+    result = null;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
+function euclideanDistance(a, b) {
+  const dx = a[0] - b[0],
+    dy = a[1] - b[1];
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// helper: Manhattan distance between [x,y] points
+function manhattanDistance(a, b) {
+  return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+}
+
+function chebyshevDistance(a, b) {
+  return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
 }

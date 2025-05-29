@@ -1,5 +1,41 @@
 import Random from "canvas-sketch-util/random.js";
 
+function square(x) {
+  return x >= 0 ? +1 : -1;
+}
+// 3-level quantized tanh
+function qtanh(x) {
+  const t = Math.tanh(x);
+  if (t > 0.5) return 1;
+  if (t < -0.5) return -1;
+  return 0;
+}
+function perReLU(x) {
+  // wrap x into [0, 2π), then relu-shift to get a bump
+  const y = x % (2 * Math.PI);
+  return Math.max(0, Math.sin(y)); // or Math.max(0, y - π); for saw-style
+}
+
+// triangle wave with period 2π
+function triangle(x) {
+  // const DP = 1;
+  // return x < -DP ? -DP : x > DP ? DP : x;
+
+  // map x into [–π, +π)
+  const y = ((x + Math.PI) % (2 * Math.PI)) - Math.PI;
+  // piecewise linear: rises to +1 then falls to –1
+  return 1 - (2 * Math.abs(y)) / Math.PI;
+}
+
+function quantizedSin(z, N = 4) {
+  const step = (2 * Math.PI) / N;
+  // wrap z into [0,2π), then quantize
+  let a = z % (2 * Math.PI);
+  if (a < 0) a += 2 * Math.PI;
+  const aq = Math.round(a / step) * step;
+  return Math.sin(aq);
+}
+
 /**
  * Create a SIREN layer:
  *  - inDim  = input dimensionality
@@ -9,6 +45,7 @@ import Random from "canvas-sketch-util/random.js";
 export function makeSineLayer(inDim, outDim, omega0 = 1.0, isFinal = false) {
   const W = new Float32Array(inDim * outDim);
   const b = new Float32Array(outDim);
+  // const Wq = new Float32Array(W.length);
 
   function initialize(isFirst = false) {
     const scale = isFirst ? 1.0 / inDim : Math.sqrt(6.0 / inDim) / omega0;
@@ -19,25 +56,35 @@ export function makeSineLayer(inDim, outDim, omega0 = 1.0, isFinal = false) {
   }
 
   function forward(x, out) {
+    const Wq = W;
     let ptrW = 0;
     for (let j = 0; j < outDim; j++) {
       let acc = b[j];
       for (let i = 0; i < inDim; i++, ptrW++) {
-        acc += W[ptrW] * x[i];
+        acc += Wq[ptrW] * x[i];
       }
       out[j] = isFinal ? acc : Math.sin(omega0 * acc);
     }
   }
 
-  return { inDim, outDim, omega0, W, b, initialize, forward };
+  function quantize(thresh = 0.05) {
+    for (let i = 0; i < W.length; i++) {
+      W[i] = W[i] > thresh ? 1 : W[i] < -thresh ? -1 : 0;
+    }
+    for (let i = 0; i < b.length; i++) {
+      b[i] = b[i] > thresh ? 1 : b[i] < -thresh ? -1 : 0;
+    }
+  }
+
+  return { inDim, quantize, outDim, omega0, W, b, initialize, forward };
 }
 
 /**
  * Build a SIREN network with zero-allocation forward + pack/unpack.
  * dims = [inDim, h1, h2, ..., outDim]
- * ω0First = ω₀ for the first layer
+ * w0 = ω₀ for the first layer
  */
-export function makeSirenNetwork(dims, ω0First = 30) {
+export function makeSirenNetwork(dims, w0 = 30) {
   const layers = [];
   let maxDim = 0;
   let totalSize = 0;
@@ -48,8 +95,8 @@ export function makeSirenNetwork(dims, ω0First = 30) {
     maxDim = Math.max(maxDim, inD, outD);
     const isFirst = i === 0;
     const isFinal = i === dims.length - 2;
-    const ω0 = isFirst ? ω0First : 1.0;
-    const layer = makeSineLayer(inD, outD, ω0, isFinal);
+    const W0 = isFirst ? w0 : 1.0;
+    const layer = makeSineLayer(inD, outD, W0, isFinal);
     layers.push(layer);
     totalSize += layer.W.length + layer.b.length;
   }
@@ -71,6 +118,12 @@ export function makeSirenNetwork(dims, ω0First = 30) {
       p += L.b.length;
     }
     return vec;
+  }
+
+  function quantize(thresh = 0.05) {
+    for (const L of layers) {
+      L.quantize(thresh);
+    }
   }
 
   function unpackParams(vec) {
@@ -101,5 +154,16 @@ export function makeSirenNetwork(dims, ω0First = 30) {
     return output;
   }
 
-  return { initialize, packParams, unpackParams, forward };
+  return {
+    inputSize: dims[0],
+    outputSize: dims[dims.length - 1],
+    initialize,
+    layers,
+    dims,
+    w0,
+    quantize,
+    packParams,
+    unpackParams,
+    forward,
+  };
 }
