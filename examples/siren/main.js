@@ -75,7 +75,7 @@ canvasSketch(async (props) => {
   const outputSize = 1;
   const stepsPerFrame = 5;
   let epoch = 0;
-  const maxEpoch = 5000;
+  const maxEpoch = 10000;
 
   const net = makeSirenNetwork([inputSize, 16, 16, outputSize], 30);
 
@@ -108,6 +108,7 @@ canvasSketch(async (props) => {
   const tmpDimOut = new Float32Array(DIM * DIM * outputSize);
   const tmpOutput = new Float32Array(outputSize);
 
+  let done = false;
   let useGrid = true,
     param = 0;
   window.addEventListener("keydown", (ev) => {
@@ -378,6 +379,12 @@ position: absolute; top: 20px; left: 20px`;
       }
       optimizer.tell(fitnesses);
       epoch++;
+    }
+    if (epoch >= maxEpoch && !done) {
+      console.log("Done");
+      done = true;
+    } else if (!done && epoch % 100 == 0) {
+      console.log(`Epoch: ${epoch} / ${maxEpoch}`);
     }
   }
   // Dynamically generate a fully-unrolled GLSL shader for a 4-input SIREN (x, y, radius, param)
